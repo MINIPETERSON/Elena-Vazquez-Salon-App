@@ -1,0 +1,7 @@
+{
+  "name": "EstiloIA - Virtual Hair Salon",
+  "description": "Simulador de cortes y colores de cabello impulsado por IA con recomendaciones personalizadas.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
