@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Header } from './components/Header';
 import { AppStep, Mode, HairOption, SimulationResult } from './types';
 import { COLOR_OPTIONS, WOMEN_CUT_OPTIONS, MEN_CUT_OPTIONS } from './constants';
@@ -22,12 +22,118 @@ const App: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   
+  // Camera State
+  const [showCamera, setShowCamera] = useState(false);
+  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
+  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
+  
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file) {
-      if (file.size > 10 * 1024 * 1024) {
+  // Cleanup camera on unmount
+  useEffect(() => {
+    return () => {
+      stopCamera();
+    };
+  }, []);
+
+  // --- CAMERA LOGIC ---
+
+  const startCamera = async () => {
+    try {
+      if (cameraStream) {
+        stopCamera();
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { 
+          facingMode: facingMode,
+          width: { ideal: 1920 },
+          height: { ideal: 1080 }
+        }
+      });
+      setCameraStream(stream);
+      setShowCamera(true);
+      setError(null);
+      // Slight delay to ensure video element is rendered
+      setTimeout(() => {
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+        }
+      }, 100);
+    } catch (err) {
+      console.error("Error accessing camera:", err);
+      setError("No se pudo acceder a la cámara. Por favor verifica los permisos.");
+      setShowCamera(false);
+    }
+  };
+
+  const stopCamera = () => {
+    if (cameraStream) {
+      cameraStream.getTracks().forEach(track => track.stop());
+      setCameraStream(null);
+    }
+  };
+
+  const closeCamera = () => {
+    stopCamera();
+    setShowCamera(false);
+  };
+
+  const switchCamera = () => {
+    setFacingMode(prev => prev === 'user' ? 'environment' : 'user');
+    // Effect will re-trigger startCamera effectively due to logic flow, 
+    // but we need to explicitly call it after state update in a real scenario
+    // or chain it. Here we'll rely on a quick restart.
+    stopCamera();
+    setTimeout(() => {
+      // Re-call start camera logic with new state is tricky inside closure,
+      // so we use a specialized launcher or effect. 
+      // Simple way:
+      navigator.mediaDevices.getUserMedia({
+        video: { facingMode: facingMode === 'user' ? 'environment' : 'user' }
+      }).then(stream => {
+        setCameraStream(stream);
+        if (videoRef.current) videoRef.current.srcObject = stream;
+      });
+    }, 200);
+  };
+
+  const capturePhoto = () => {
+    if (videoRef.current && canvasRef.current) {
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+      
+      // Set canvas dimensions to match video
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        // Draw image
+        if (facingMode === 'user') {
+          // Mirror effect for selfie
+          ctx.translate(canvas.width, 0);
+          ctx.scale(-1, 1);
+        }
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        
+        // Convert to file
+        canvas.toBlob((blob) => {
+          if (blob) {
+            const file = new File([blob], "camera_capture.jpg", { type: "image/jpeg" });
+            handleFileProcess(file);
+            closeCamera();
+          }
+        }, 'image/jpeg', 0.9);
+      }
+    }
+  };
+
+  // --- APP LOGIC ---
+
+  const handleFileProcess = (file: File) => {
+     if (file.size > 10 * 1024 * 1024) {
         setError("La imagen es demasiado grande. Máximo 10MB.");
         return;
       }
@@ -35,6 +141,12 @@ const App: React.FC = () => {
       setPreviewUrl(URL.createObjectURL(file));
       setStep(AppStep.SIMULATE);
       setError(null);
+  };
+
+  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      handleFileProcess(file);
     }
   };
 
@@ -98,6 +210,61 @@ const App: React.FC = () => {
 
   // --- RENDERERS ---
 
+  const renderCameraModal = () => (
+    <div className="fixed inset-0 z-[60] bg-black flex flex-col animate-fade-in">
+      {/* Hidden canvas for processing */}
+      <canvas ref={canvasRef} className="hidden" />
+      
+      {/* Video Feed */}
+      <div className="flex-1 relative overflow-hidden flex items-center justify-center bg-black">
+        <video 
+          ref={videoRef} 
+          autoPlay 
+          playsInline 
+          className={`w-full h-full object-cover ${facingMode === 'user' ? 'scale-x-[-1]' : ''}`}
+        />
+        <div className="absolute top-4 right-4 z-10">
+          <button 
+            onClick={closeCamera} 
+            className="bg-black/50 text-white p-3 rounded-full hover:bg-black/70 backdrop-blur"
+          >
+            ✕
+          </button>
+        </div>
+      </div>
+
+      {/* Controls */}
+      <div className="bg-black/90 p-8 pb-12">
+        <div className="flex items-center justify-around max-w-sm mx-auto">
+          {/* Gallery Fallback */}
+          <button 
+            onClick={() => {
+               closeCamera();
+               fileInputRef.current?.click();
+            }}
+            className="p-4 rounded-full bg-gray-800 text-white hover:bg-gray-700"
+          >
+            🖼️
+          </button>
+
+          {/* Shutter Button */}
+          <button 
+            onClick={capturePhoto}
+            className="w-20 h-20 rounded-full bg-white border-4 border-gray-300 shadow-lg transform active:scale-95 transition-transform"
+          />
+
+          {/* Switch Camera */}
+          <button 
+            onClick={switchCamera}
+            className="p-4 rounded-full bg-gray-800 text-white hover:bg-gray-700"
+          >
+            🔄
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
   const renderUploadHero = () => (
     <div className="flex flex-col items-center justify-center min-h-[calc(100vh-64px)] p-6 bg-gradient-to-b from-white to-gray-50">
       <div className="max-w-3xl w-full text-center space-y-8">
@@ -110,28 +277,49 @@ const App: React.FC = () => {
           </p>
         </div>
 
-        {/* Upload Box */}
-        <div 
-          onClick={() => fileInputRef.current?.click()}
-          className="group cursor-pointer relative bg-white border-2 border-dashed border-gray-300 hover:border-indigo-500 rounded-3xl p-12 transition-all duration-300 hover:shadow-xl hover:shadow-indigo-100/50"
-        >
-          <input 
-            type="file" 
-            ref={fileInputRef}
-            accept="image/*"
-            className="hidden"
-            onChange={handleFileSelect}
-          />
-          <div className="flex flex-col items-center gap-4">
-            <div className="w-20 h-20 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center text-4xl group-hover:scale-110 transition-transform duration-300">
-              📸
+        <div className="flex flex-col md:flex-row gap-4 items-center justify-center w-full">
+          {/* Upload Box */}
+          <div 
+            onClick={() => fileInputRef.current?.click()}
+            className="group cursor-pointer flex-1 w-full md:max-w-xs relative bg-white border-2 border-dashed border-gray-300 hover:border-indigo-500 rounded-3xl p-8 transition-all duration-300 hover:shadow-xl hover:shadow-indigo-100/50 flex flex-col items-center gap-4"
+          >
+            <input 
+              type="file" 
+              ref={fileInputRef}
+              accept="image/*"
+              className="hidden"
+              onChange={handleFileSelect}
+            />
+            <div className="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center text-3xl group-hover:scale-110 transition-transform duration-300">
+              📁
             </div>
-            <div className="space-y-2">
-              <h3 className="text-xl font-bold text-gray-900">Click para subir foto</h3>
-              <p className="text-gray-400 text-sm">JPG o PNG hasta 10MB</p>
+            <div className="space-y-1 text-center">
+              <h3 className="text-lg font-bold text-gray-900">Subir Archivo</h3>
+              <p className="text-gray-400 text-xs">JPG o PNG hasta 10MB</p>
             </div>
           </div>
+
+          <div className="text-gray-400 font-serif italic text-lg">- o -</div>
+
+          {/* Camera Button */}
+          <button 
+            onClick={startCamera}
+            className="group cursor-pointer flex-1 w-full md:max-w-xs relative bg-indigo-600 border-2 border-transparent hover:bg-indigo-700 rounded-3xl p-8 transition-all duration-300 shadow-xl shadow-indigo-200 flex flex-col items-center gap-4"
+          >
+            <div className="w-16 h-16 bg-white/20 text-white rounded-full flex items-center justify-center text-3xl group-hover:scale-110 transition-transform duration-300">
+              📸
+            </div>
+            <div className="space-y-1 text-center">
+              <h3 className="text-lg font-bold text-white">Usar Cámara</h3>
+              <p className="text-indigo-100 text-xs">Selfie o Cámara trasera</p>
+            </div>
+          </button>
         </div>
+        
+        {/* Error Message */}
+        {error && (
+            <p className="text-red-500 text-sm mt-4 bg-red-50 p-2 rounded-lg inline-block">{error}</p>
+        )}
       </div>
     </div>
   );
@@ -369,6 +557,9 @@ const App: React.FC = () => {
         {step === AppStep.UPLOAD ? renderUploadHero() : renderSimulator()}
       </main>
       
+      {/* Camera Modal */}
+      {showCamera && renderCameraModal()}
+
       <style>{`
         @keyframes fadeInUp {
           from { opacity: 0; transform: translateY(20px); }
