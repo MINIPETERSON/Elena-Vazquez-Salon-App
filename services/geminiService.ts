@@ -9,19 +9,61 @@ const getClient = () => {
   return new GoogleGenAI({ apiKey });
 };
 
-// Convert Blob/File to Base64 string
-export const fileToGenerativePart = async (file: File): Promise<string> => {
+// Resize image to ensure it's within API limits and performant
+const resizeImage = async (file: File, maxWidth = 1024, maxHeight = 1024): Promise<string> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onloadend = () => {
-      const base64String = reader.result as string;
-      // Remove data url prefix (e.g. "data:image/jpeg;base64,")
-      const base64Data = base64String.split(',')[1];
-      resolve(base64Data);
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        let width = img.width;
+        let height = img.height;
+
+        // Calculate new dimensions keeping aspect ratio
+        if (width > height) {
+          if (width > maxWidth) {
+            height *= maxWidth / width;
+            width = maxWidth;
+          }
+        } else {
+          if (height > maxHeight) {
+            width *= maxHeight / height;
+            height = maxHeight;
+          }
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+           reject(new Error("Could not get canvas context"));
+           return;
+        }
+        
+        // Draw with smoothing
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(img, 0, 0, width, height);
+        
+        // Convert to base64 JPEG with decent compression
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+        const base64 = dataUrl.split(',')[1];
+        resolve(base64);
+      };
+      img.onerror = (err) => reject(new Error("Failed to load image for resizing"));
+      if (e.target?.result) {
+        img.src = e.target.result as string;
+      }
     };
-    reader.onerror = reject;
+    reader.onerror = (err) => reject(new Error("Failed to read file"));
     reader.readAsDataURL(file);
   });
+};
+
+// Convert Blob/File to Base64 string (optimized)
+export const fileToGenerativePart = async (file: File): Promise<string> => {
+  return resizeImage(file);
 };
 
 export const generateSimulation = async (
@@ -44,27 +86,26 @@ export const generateSimulation = async (
   }
 
   if (customPrompt) {
-    instructions.push(`Additional details: ${customPrompt}`);
+    instructions.push(`User request details: ${customPrompt}`);
   }
 
-  // Preservation logic:
-  // If we are doing a cut but NO color, explicitly say keep color.
-  if (cutOption && !colorOption) {
+  // Preservation logic refined:
+  // Only enforce strict preservation if the user hasn't provided a custom prompt that might contradict it.
+  
+  // If we are doing a cut but NO color, and NO custom prompt implies color change
+  if (cutOption && !colorOption && !customPrompt) {
     instructions.push("Keep the hair color natural and unchanged.");
   }
-  // If we are doing a color but NO cut, explicitly say keep style.
-  if (colorOption && !cutOption) {
+  
+  // If we are doing a color but NO cut, and NO custom prompt implies cut change
+  if (colorOption && !cutOption && !customPrompt) {
     instructions.push("Keep the hairstyle, length, and texture exactly the same.");
-  }
-  // If neither, but custom prompt exists
-  if (!cutOption && !colorOption && customPrompt) {
-    // Rely on custom prompt, but generally try to maintain face.
   }
 
   const taskDescription = instructions.join(" ");
 
   if (!taskDescription) {
-    throw new Error("No instruction provided");
+    throw new Error("No hay instrucciones suficientes. Selecciona una opción o escribe un detalle.");
   }
 
   // 1. Generate the Image Modification
@@ -149,8 +190,9 @@ export const generateSimulation = async (
       image: generatedImage,
       advice: adviceText,
     };
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error generating simulation:", error);
-    throw error;
+    // Propagate the actual error message
+    throw new Error(error.message || "Error desconocido en el servicio de IA");
   }
 };

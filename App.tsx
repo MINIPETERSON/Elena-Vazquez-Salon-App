@@ -82,14 +82,8 @@ const App: React.FC = () => {
 
   const switchCamera = () => {
     setFacingMode(prev => prev === 'user' ? 'environment' : 'user');
-    // Effect will re-trigger startCamera effectively due to logic flow, 
-    // but we need to explicitly call it after state update in a real scenario
-    // or chain it. Here we'll rely on a quick restart.
     stopCamera();
     setTimeout(() => {
-      // Re-call start camera logic with new state is tricky inside closure,
-      // so we use a specialized launcher or effect. 
-      // Simple way:
       navigator.mediaDevices.getUserMedia({
         video: { facingMode: facingMode === 'user' ? 'environment' : 'user' }
       }).then(stream => {
@@ -133,8 +127,10 @@ const App: React.FC = () => {
   // --- APP LOGIC ---
 
   const handleFileProcess = (file: File) => {
-     if (file.size > 10 * 1024 * 1024) {
-        setError("La imagen es demasiado grande. Máximo 10MB.");
+     // Note: We resized in service, but initial check is good practice.
+     // Increased limit slightly as we resize anyway, but kept warning for huge files.
+     if (file.size > 20 * 1024 * 1024) {
+        setError("La imagen es demasiado grande. Máximo 20MB.");
         return;
       }
       setSelectedFile(file);
@@ -177,7 +173,9 @@ const App: React.FC = () => {
     setError(null);
 
     try {
+      // The file is automatically resized inside fileToGenerativePart now
       const base64Data = await fileToGenerativePart(selectedFile);
+      
       const simulationData = await generateSimulation(
         base64Data, 
         selectedCut, 
@@ -190,9 +188,11 @@ const App: React.FC = () => {
         advice: simulationData.advice
       });
       setIsGenerating(false);
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      setError("Hubo un error al generar la simulación. Por favor, intenta de nuevo.");
+      // Display the actual error message to the user
+      const errorMessage = err.message || "Error desconocido";
+      setError(`Ocurrió un error: ${errorMessage}. Intenta de nuevo.`);
       setIsGenerating(false);
     }
   };
@@ -212,10 +212,8 @@ const App: React.FC = () => {
 
   const renderCameraModal = () => (
     <div className="fixed inset-0 z-[60] bg-black flex flex-col animate-fade-in">
-      {/* Hidden canvas for processing */}
       <canvas ref={canvasRef} className="hidden" />
       
-      {/* Video Feed */}
       <div className="flex-1 relative overflow-hidden flex items-center justify-center bg-black">
         <video 
           ref={videoRef} 
@@ -233,10 +231,8 @@ const App: React.FC = () => {
         </div>
       </div>
 
-      {/* Controls */}
       <div className="bg-black/90 p-8 pb-12">
         <div className="flex items-center justify-around max-w-sm mx-auto">
-          {/* Gallery Fallback */}
           <button 
             onClick={() => {
                closeCamera();
@@ -247,13 +243,11 @@ const App: React.FC = () => {
             🖼️
           </button>
 
-          {/* Shutter Button */}
           <button 
             onClick={capturePhoto}
             className="w-20 h-20 rounded-full bg-white border-4 border-gray-300 shadow-lg transform active:scale-95 transition-transform"
           />
 
-          {/* Switch Camera */}
           <button 
             onClick={switchCamera}
             className="p-4 rounded-full bg-gray-800 text-white hover:bg-gray-700"
@@ -278,7 +272,6 @@ const App: React.FC = () => {
         </div>
 
         <div className="flex flex-col md:flex-row gap-4 items-center justify-center w-full">
-          {/* Upload Box */}
           <div 
             onClick={() => fileInputRef.current?.click()}
             className="group cursor-pointer flex-1 w-full md:max-w-xs relative bg-white border-2 border-dashed border-gray-300 hover:border-indigo-500 rounded-3xl p-8 transition-all duration-300 hover:shadow-xl hover:shadow-indigo-100/50 flex flex-col items-center gap-4"
@@ -301,7 +294,6 @@ const App: React.FC = () => {
 
           <div className="text-gray-400 font-serif italic text-lg">- o -</div>
 
-          {/* Camera Button */}
           <button 
             onClick={startCamera}
             className="group cursor-pointer flex-1 w-full md:max-w-xs relative bg-indigo-600 border-2 border-transparent hover:bg-indigo-700 rounded-3xl p-8 transition-all duration-300 shadow-xl shadow-indigo-200 flex flex-col items-center gap-4"
@@ -316,16 +308,14 @@ const App: React.FC = () => {
           </button>
         </div>
         
-        {/* Error Message */}
         {error && (
-            <p className="text-red-500 text-sm mt-4 bg-red-50 p-2 rounded-lg inline-block">{error}</p>
+            <p className="text-red-500 text-sm mt-4 bg-red-50 p-2 rounded-lg inline-block text-center max-w-md">{error}</p>
         )}
       </div>
     </div>
   );
 
   const renderSimulator = () => {
-    // Determine options based on state
     let options: HairOption[] = [];
     if (activeTab === Mode.COLOR) {
       options = COLOR_OPTIONS;
@@ -338,9 +328,7 @@ const App: React.FC = () => {
     return (
       <div className="max-w-4xl mx-auto p-4 md:p-8 space-y-8">
         
-        {/* Main Content Area */}
         <div className="bg-white rounded-3xl shadow-xl border border-gray-100 overflow-hidden">
-          {/* Image Preview */}
           <div className="relative bg-gray-100 aspect-video md:aspect-[21/9] overflow-hidden group">
             <div className="absolute inset-0 flex items-center justify-center bg-gray-900/5 backdrop-blur-[2px]">
                {previewUrl && (
@@ -359,7 +347,6 @@ const App: React.FC = () => {
               🔄
             </button>
 
-            {/* Selection Summaries (Overlay) */}
             <div className="absolute bottom-4 left-4 flex gap-2">
                {selectedCut && (
                  <span className="bg-white/90 backdrop-blur px-3 py-1 rounded-full text-xs font-bold text-indigo-900 shadow-sm border border-indigo-100 flex items-center gap-1">
@@ -374,10 +361,8 @@ const App: React.FC = () => {
             </div>
           </div>
 
-          {/* Controls Section */}
           <div className="p-6 md:p-8 space-y-6">
             
-            {/* Tabs */}
             <div className="flex flex-col gap-4">
               <div className="flex justify-center border-b border-gray-100 pb-1">
                  <button 
@@ -408,7 +393,6 @@ const App: React.FC = () => {
                  </button>
               </div>
 
-              {/* Gender Sub-selector (Only visible when CUT tab is active) */}
               {activeTab === Mode.CUT && (
                 <div className="flex justify-center animate-fade-in">
                   <div className="bg-gray-100 p-1 rounded-lg flex text-sm">
@@ -437,7 +421,6 @@ const App: React.FC = () => {
               )}
             </div>
 
-            {/* Presets / Chips Grid */}
             <div className="space-y-3 min-h-[150px]">
               <div className="flex flex-wrap gap-2 justify-center">
                 {options.map((opt) => (
@@ -456,7 +439,6 @@ const App: React.FC = () => {
               </div>
             </div>
 
-            {/* Custom Input */}
             <div className="space-y-2 pt-4 border-t border-gray-100">
                <label className="text-xs font-bold text-gray-500 uppercase tracking-wide">
                 Detalles Extra (Opcional)
@@ -471,7 +453,6 @@ const App: React.FC = () => {
               </div>
             </div>
 
-            {/* Generate Button */}
             <button
               onClick={startSimulation}
               disabled={isGenerating || (!selectedCut && !selectedColor && !customPrompt.trim())}
@@ -493,12 +474,11 @@ const App: React.FC = () => {
               )}
             </button>
              {error && (
-              <p className="text-red-500 text-sm text-center bg-red-50 p-2 rounded-lg">{error}</p>
+              <p className="text-red-500 text-sm text-center bg-red-50 p-2 rounded-lg border border-red-100">{error}</p>
             )}
           </div>
         </div>
         
-        {/* Result Area (Inline) */}
         {result && (
           <div className="bg-white rounded-3xl shadow-xl border border-gray-100 overflow-hidden animate-fade-in-up">
             <div className="p-6 md:p-8 border-b border-gray-100">
@@ -506,7 +486,6 @@ const App: React.FC = () => {
             </div>
             
             <div className="grid md:grid-cols-2 gap-0">
-               {/* Result Image */}
                <div className="bg-gray-100 p-8 flex items-center justify-center">
                  {result.generatedImageBase64 ? (
                     <img 
@@ -519,7 +498,6 @@ const App: React.FC = () => {
                  )}
                </div>
 
-               {/* Result Details */}
                <div className="p-8 bg-gradient-to-br from-white to-purple-50 flex flex-col justify-center space-y-6">
                  <div>
                    <h4 className="font-bold text-indigo-900 mb-2 flex items-center gap-2">
@@ -557,7 +535,6 @@ const App: React.FC = () => {
         {step === AppStep.UPLOAD ? renderUploadHero() : renderSimulator()}
       </main>
       
-      {/* Camera Modal */}
       {showCamera && renderCameraModal()}
 
       <style>{`
